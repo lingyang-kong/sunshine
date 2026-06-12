@@ -43,9 +43,9 @@ normalize_release_file() {
 	SUITE="$suite" perl -0pe '
 		s/^Suite: .*/Suite: $ENV{SUITE}/m;
 		s/^Codename: .*/Codename: $ENV{SUITE}/m;
-		s/^Origin: .*/Origin: Sunshine/m;
-		s/^Label: .*/Label: Sunshine/m;
-		s/^Description: .*/Description: Sunshine upstream APT mirror/m;
+		s/^Origin: .*/Origin: Unofficial Sunshine Mirror/m;
+		s/^Label: .*/Label: Unofficial Sunshine Mirror/m;
+		s/^Description: .*/Description: Unofficial mirror of Sunshine upstream APT packages/m;
 	' "$source" >"$target"
 }
 
@@ -209,6 +209,12 @@ download_selected_assets() {
 		tag_name="$(jq -r '.tag_name' <<<"$release_json")"
 		local published_at
 		published_at="$(jq -r '.published_at' <<<"$release_json")"
+		local release_page_url
+		release_page_url="$(jq -r '.html_url' <<<"$release_json")"
+		local source_tarball_url
+		source_tarball_url="$(jq -r '.tarball_url' <<<"$release_json")"
+		local source_zipball_url
+		source_zipball_url="$(jq -r '.zipball_url' <<<"$release_json")"
 
 		while IFS= read -r asset_json; do
 			[[ -n $asset_json ]] || continue
@@ -248,6 +254,9 @@ download_selected_assets() {
 				--arg release_id "$release_id" \
 				--arg tag_name "$tag_name" \
 				--arg published_at "$published_at" \
+				--arg release_page_url "$release_page_url" \
+				--arg source_tarball_url "$source_tarball_url" \
+				--arg source_zipball_url "$source_zipball_url" \
 				--arg suite "$suite" \
 				--arg arch "$arch" \
 				--arg name "$name" \
@@ -262,6 +271,9 @@ download_selected_assets() {
 					release_id: $release_id,
 					tag_name: $tag_name,
 					published_at: $published_at,
+					release_page_url: $release_page_url,
+					source_tarball_url: $source_tarball_url,
+					source_zipball_url: $source_zipball_url,
 					suite: $suite,
 					arch: $arch,
 					asset_name: $name,
@@ -302,13 +314,13 @@ generate_apt_metadata() {
 		local suite_dir="$OUT_DIR/dists/$suite"
 		local release_raw="$WORK_DIR/${suite//\//_}.Release.raw"
 		apt-ftparchive \
-			-o "APT::FTPArchive::Release::Origin=Sunshine" \
-			-o "APT::FTPArchive::Release::Label=Sunshine" \
+			-o "APT::FTPArchive::Release::Origin=Unofficial Sunshine Mirror" \
+			-o "APT::FTPArchive::Release::Label=Unofficial Sunshine Mirror" \
 			-o "APT::FTPArchive::Release::Suite=$suite" \
 			-o "APT::FTPArchive::Release::Codename=$suite" \
 			-o "APT::FTPArchive::Release::Architectures=${arches[*]}" \
 			-o "APT::FTPArchive::Release::Components=main" \
-			-o "APT::FTPArchive::Release::Description=Sunshine upstream APT mirror" \
+			-o "APT::FTPArchive::Release::Description=Unofficial mirror of Sunshine upstream APT packages" \
 			release "$suite_dir" >"$release_raw"
 		normalize_release_file "$release_raw" "$suite_dir/Release" "$suite"
 		rm -f "$release_raw"
