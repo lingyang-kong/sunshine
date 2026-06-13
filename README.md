@@ -29,15 +29,16 @@ Current suite names follow upstream naming, for example:
 
 ## Automation
 
-GitHub Actions rebuilds the repository every Monday and Thursday at 06:17 UTC.
+GitHub Actions polls the newest stable release every Monday and Thursday at 06:17 UTC. It rebuilds only when that release or any of its `.deb` asset metadata differs from the last published snapshot.
 
 The workflow:
 
-1. Reads stable releases from `LizardByte/Sunshine`.
-2. Calculates how much space a new release would add and evicts the oldest retained whole releases until it fits.
-3. Downloads those packages.
-4. Generates suite-specific `Packages`, `Release`, `InRelease`, and `Release.gpg` metadata.
-5. Publishes the snapshot from `dist/` to GitHub Pages.
+1. Compares the newest stable release and its `.deb` asset metadata with the published `releases.json`.
+2. Stops without downloading packages when that metadata is unchanged.
+3. Reads stable releases from `LizardByte/Sunshine` when a rebuild is required.
+4. Calculates how much space a new release would add and evicts the oldest retained whole releases until it fits.
+5. Downloads those packages and generates suite-specific `Packages`, `Release`, `InRelease`, and `Release.gpg` metadata.
+6. Publishes the snapshot from `dist/` to GitHub Pages.
 
 Retained releases coexist under `pool/main/s/sunshine/<suite>/` without overwriting each other.
 

@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_NAME="$(basename -- "${BASH_SOURCE[0]}")"
 ROOT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 
+readonly SCRIPT_NAME
 readonly ROOT_DIR
 readonly WORK_DIR="${WORK_DIR:-$ROOT_DIR/.build/sunshine-apt}"
 readonly OUT_DIR="${OUT_DIR:-$ROOT_DIR/dist}"
@@ -10,9 +12,16 @@ readonly API_REPO="${API_REPO:-LizardByte/Sunshine}"
 readonly API_URL="https://api.github.com/repos/$API_REPO/releases"
 readonly MAX_BYTES="${MAX_BYTES:-1000000000}"
 readonly USER_AGENT='sunshine-apt-sync'
-readonly TEMPLATE_DIR="$ROOT_DIR/templates"
-readonly INDEX_TEMPLATE="$TEMPLATE_DIR/index.html"
-readonly RELEASES_MANIFEST_FILTER="$TEMPLATE_DIR/releases-manifest.jq"
+readonly INDEX_TEMPLATE="$ROOT_DIR/templates/index.html"
+readonly RELEASES_MANIFEST_FILTER='
+{
+	source_repo: $api_repo,
+	generated_at: $generated_at,
+	max_bytes: $max_bytes,
+	newest_release: $newest_release,
+	mirrored_assets: .
+}
+'
 
 fail() {
 	echo "$1" >&2
@@ -126,6 +135,56 @@ collect_stable_releases() {
 
 		[[ $count -lt $page_size ]] && break
 	done
+}
+
+newest_release_snapshot() {
+	jq -S -c '{
+		release_id: (.id | tostring),
+		tag_name,
+		assets: [
+			.assets[] | select(.name | endswith(".deb")) | {
+				asset_id: (.id | tostring),
+				name,
+				size,
+				updated_at,
+				browser_download_url,
+				content_type,
+				state,
+				digest
+			}
+		] | sort_by(.asset_id)
+	}'
+}
+
+check_newest_release_changed() {
+	local previous_manifest_url=$1
+	local releases_file
+	releases_file="$(mktemp)"
+
+	collect_stable_releases "$releases_file"
+	[[ -s $releases_file ]] || fail 'no stable releases found'
+
+	local current_snapshot
+	current_snapshot="$(head -n 1 "$releases_file" | newest_release_snapshot)"
+	rm -f "$releases_file"
+
+	local previous_manifest
+	if ! previous_manifest="$(curl -fsSL -H "User-Agent: $USER_AGENT" "$previous_manifest_url")"; then
+		printf '%s\n' 'true'
+		return
+	fi
+
+	local previous_snapshot
+	if ! previous_snapshot="$(jq -e -S -c '.newest_release' <<<"$previous_manifest" 2>/dev/null)"; then
+		printf '%s\n' 'true'
+		return
+	fi
+	if [[ -z $previous_snapshot || $previous_snapshot != "$current_snapshot" ]]; then
+		printf '%s\n' 'true'
+		return
+	fi
+
+	printf '%s\n' 'false'
 }
 
 write_release_list() {
@@ -354,11 +413,16 @@ sign_repository_metadata() {
 
 write_release_manifest() {
 	local manifest_file=$1
+	local selected_file=$2
+	local newest_release
+	newest_release="$(tail -n 1 "$selected_file" | newest_release_snapshot)"
+
 	jq -s \
 		--arg api_repo "$API_REPO" \
 		--arg generated_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
 		--argjson max_bytes "$MAX_BYTES" \
-		-f "$RELEASES_MANIFEST_FILTER" \
+		--argjson newest_release "$newest_release" \
+		"$RELEASES_MANIFEST_FILTER" \
 		"$manifest_file" >"$OUT_DIR/releases.json"
 }
 
@@ -384,7 +448,7 @@ build_repository() {
 	download_selected_assets "$selected_file" "$manifest_file"
 	generate_apt_metadata "$manifest_file"
 	sign_repository_metadata
-	write_release_manifest "$manifest_file"
+	write_release_manifest "$manifest_file" "$selected_file"
 
 	cp "$INDEX_TEMPLATE" "$OUT_DIR/index.html"
 }
@@ -401,6 +465,15 @@ enforce_pages_size_limit() {
 }
 
 main() {
+	if [[ ${1:-} == '--check-newest-release' ]]; then
+		[[ $# -eq 2 ]] || fail "usage: $SCRIPT_NAME --check-newest-release URL"
+		require_command curl
+		require_command jq
+		check_newest_release_changed "$2"
+		return
+	fi
+	[[ $# -eq 0 ]] || fail "usage: $SCRIPT_NAME [--check-newest-release URL]"
+
 	local required_command_name
 	for required_command_name in \
 		apt-ftparchive \

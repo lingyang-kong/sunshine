@@ -17,30 +17,42 @@ concurrency:
 jobs:
     publish:
         runs-on: ubuntu-latest
+        outputs:
+            changed: ${{ steps.poll.outputs.changed }}
         env:
             APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
             GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
             MAX_BYTES: 1000000000
+            PUBLISHED_MANIFEST_URL: https://lingyang-kong.github.io/sunshine/releases.json
         steps:
             - name: Check out repository
               uses: actions/checkout@v4
 
+            - name: Poll newest release metadata
+              id: poll
+              run: echo "changed=$(scripts/sync-apt-repo.sh --check-newest-release "$PUBLISHED_MANIFEST_URL")" >>"$GITHUB_OUTPUT"
+
             - name: Install repository tools
+              if: steps.poll.outputs.changed == 'true'
               run: sudo apt-get update && sudo apt-get install -y --no-install-recommends apt-utils dpkg-dev gnupg jq
 
             - name: Build APT repository
+              if: steps.poll.outputs.changed == 'true'
               run: scripts/sync-apt-repo.sh
 
             - name: Configure GitHub Pages
+              if: steps.poll.outputs.changed == 'true'
               uses: actions/configure-pages@v5
 
             - name: Upload Pages artifact
+              if: steps.poll.outputs.changed == 'true'
               uses: actions/upload-pages-artifact@v3
               with:
                   path: dist
 
     deploy:
         needs: publish
+        if: needs.publish.outputs.changed == 'true'
         runs-on: ubuntu-latest
         permissions:
             pages: write
